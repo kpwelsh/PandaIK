@@ -49,14 +49,24 @@ fn main() {
     let mut goal = Vector3::new(0.5, 0.0, 0.5);
 
     let mut panoc_cache = PANOCCache::new(7, 1e-4, 100);
-    let bounds = constraints::Ball2::new(None, 1e5);
+
+    let mut xmin = Vec::new();
+    let mut xmax = Vec::new();
+    for j in arm.iter_joints() {
+        let range = (*j).limits.unwrap();
+        xmin.push(range.min + 1e-2);
+        xmax.push(range.max - 1e-2);
+    }
+
+    let bounds = constraints::Rectangle::new(Some(&xmin), Some(&xmax));
     let mut u = vec![0.0, 0.0, 0.0, -1.5, 0.0, 1.5, 0.0];
     
     arm.set_joint_positions(&u).unwrap();
     arm.update_transforms();
 
     let start = Instant::now();
-    for i in 0..1000 {
+    let N = 1000;
+    for i in 0..N {
         goal[2] -= 0.001;
         let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
             arm.set_joint_positions(u).unwrap();
@@ -76,10 +86,10 @@ fn main() {
 
         let problem = Problem::new(&bounds, df, f);
         let mut panoc = PANOCOptimizer::new(problem, &mut panoc_cache)
-                            .with_max_iter(10);
+                            .with_max_iter(1);
         let status = panoc.solve(&mut u).unwrap();
         arm.set_joint_positions(&u).unwrap();
     }
     let duration = start.elapsed();
-    println!("{}", duration.as_millis());
+    println!("{}", 1e6 * N as f64 / (duration.as_micros() as f64));
 }
