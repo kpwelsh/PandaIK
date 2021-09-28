@@ -10,6 +10,9 @@ edition = "2018"
 optimization_engine = "0.6.0"
 nalgebra = "0.26"
 k = "0.25"
+hyperdual = "0"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.8"
 
 [profile.release]
 opt-level = 3

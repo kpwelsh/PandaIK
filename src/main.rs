@@ -1,44 +1,48 @@
-use k;
-use std::time::{Duration, Instant};
-use optimization_engine::{constraints::*, panoc::*, *};
+use std::time::{Instant};
+
+
+mod robot;
+use robot::state::{State, NamedTransform};
+use robot::constraints::{RobotConstraints, ParsedConstraints};
+
 extern crate nalgebra as na;
-use na::{Vector3, Rotation3, Rotation};
+use na::{Vector3};
 
-fn updateStuff(arm : &k::SerialChain<f64>) {
-    let angles = vec![0.2, 0.2, 0.0, -1.0, 0.0, 0.0, 0.2];
-    arm.set_joint_positions(&angles).unwrap();
-    arm.update_transforms();
-}
+use serde_yaml;
+use std::fs::File;
+use std::io::BufReader;
 
+fn initial_state(u: &[f64; 7]) -> State {
+    let zeros = [Some(0.0); 7];
 
-fn cost(u: &[f64], c: &mut f64) -> Result<(), SolverError> {
-    
-    Ok(())
-}
-
-
-fn finite_diff(f: &dyn Fn(&[f64], &mut f64) -> Result<(), SolverError>, u: &[f64], grad: &mut [f64]) {
-    let h = 1e-4;
-    let mut f0 = 0.0;
-    f(u, &mut f0).unwrap();
-
-    let mut x = [0.0,0.0,0.0,0.0,0.0,0.0,0.0];
-    for i in 0..7 {
-        x[i] = u[i];
-    }
-
-    for i in 0..7 {
-        let mut fi = 0.0;
-        x[i] += h;
-        f(&x, &mut fi).unwrap();
-        grad[i] = (fi - f0) / h;
-        x[i] -= h;
+    State { 
+        joint_position: u.map(|ui| {Some(ui)}), 
+        joint_velocity: zeros, 
+        joint_acceleration: zeros, 
+        transforms: None
     }
 }
+
+fn update_state(state: &mut State, u: &[f64; 7], dt : f64) {
+    let mut vel = [0.0; 7];
+    let mut accel = [0.0; 7];
+    for i in 0..7 {
+        vel[i] = (u[i] - state.joint_position[i].unwrap()) / dt;
+        accel[i] = (vel[i] - state.joint_velocity[i].unwrap()) / dt;
+    }
+
+    state.joint_position = u.map(|ui| {Some(ui)});
+    state.joint_velocity = vel.map(|vi| {Some(vi)});
+    state.joint_acceleration = accel.map(|ai| {Some(ai)});
+}
+
 
 fn main() {
-    let chain = k::Chain::<f64>::from_urdf_file("panda.urdf").unwrap();
+    let file = File::open("constraints.yaml").unwrap();
+    let rdr = BufReader::new(file);
+    let constraints : robot::constraints::RobotConstraints = serde_yaml::from_reader(rdr).unwrap();
 
+    let chain = k::Chain::<f64>::from_urdf_file("panda.urdf").unwrap();
     
     // Create a set of joints from end joint
     let ee = chain.find("panda_joint8").unwrap();
@@ -46,50 +50,30 @@ fn main() {
     println!("chain: {}", arm);
 
 
-    let mut goal = Vector3::new(0.5, 0.0, 0.5);
+    let mut controller = robot::ik::Controller::new(arm, Some(ParsedConstraints::from_robot_constraints(constraints)));
 
-    let mut panoc_cache = PANOCCache::new(7, 1e-4, 100);
 
-    let mut xmin = Vec::new();
-    let mut xmax = Vec::new();
-    for j in arm.iter_joints() {
-        let range = (*j).limits.unwrap();
-        xmin.push(range.min + 1e-2);
-        xmax.push(range.max - 1e-2);
-    }
+    let mut goal = NamedTransform {
+        name: "panda_joint8".to_string(),
+        position: Some(Vector3::from([-10., 0.0, 0.4])),
+        rotation: None
+    };
 
-    let bounds = constraints::Rectangle::new(Some(&xmin), Some(&xmax));
-    let mut u = vec![0.0, 0.0, 0.0, -1.5, 0.0, 1.5, 0.0];
-    
-    arm.set_joint_positions(&u).unwrap();
-    arm.update_transforms();
+    let mut state = initial_state(&[0.0, 0.0, 0.0, -1.5, 0.0, 1.5, 0.0]);
 
     let start = Instant::now();
     let N = 1000;
+    let dt = 1e-3;
+    println!("{:?}", state.joint_position);
     for i in 0..N {
-        goal[2] -= 0.001;
-        let f = |u: &[f64], c: &mut f64| -> Result<(), SolverError> {
-            arm.set_joint_positions(u).unwrap();
-            arm.update_transforms();
-            let trans = arm.end_transform();
-            *c = (goal - trans.translation.vector).norm_squared();
-            Ok(())
-        };
 
+        let mut desired_state = State::new();
+        desired_state.transforms = Some(vec![goal.clone()]);
 
-        let df = |u: &[f64], grad: &mut [f64]| -> Result<(), SolverError> {
-            finite_diff(&f, u, grad);
-    
-            Ok(())
-        };
-    
-
-        let problem = Problem::new(&bounds, df, f);
-        let mut panoc = PANOCOptimizer::new(problem, &mut panoc_cache)
-                            .with_max_iter(1);
-        let status = panoc.solve(&mut u).unwrap();
-        arm.set_joint_positions(&u).unwrap();
+        let u = controller.update(&state, &desired_state, dt);
+        update_state(&mut state, &u, dt);
     }
+    println!("{:?}", state.joint_position);
     let duration = start.elapsed();
     println!("{}", 1e6 * N as f64 / (duration.as_micros() as f64));
 }
