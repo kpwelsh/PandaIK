@@ -69,23 +69,23 @@ joint_accel:
 
 joint_jerk:
   -
-    min: -87
-    max: 87
+    min: -7500
+    max: 7500
   -
-    min: -87
-    max: 87
+    min: -3750
+    max: 3750
   -
-    min: -87
-    max: 87
+    min: -5000
+    max: 5000
   -
-    min: -87
-    max: 87
+    min: -6250
+    max: 6250
   -
-    min: -12
-    max: 12
+    min: -7500
+    max: 7500
   -
-    min: -12
-    max: 12
+    min: -10000
+    max: 10000
   -
-    min: -12
-    max: 12
+    min: -10000
+    max: 10000

@@ -125,10 +125,6 @@ fn compute_bounds(state: &State, constraints: &ParsedConstraints, dt: f64) -> ([
     let dt2 = dt * dt;
     let dt3 = dt2 * dt;
 
-    let forward_stopping_distance = constraints.joint_jerk_min * dt3 +
-     ddq*dt2 + dq*dt;
-    let reverse_stopping_distance = constraints.joint_jerk_max * dt3 + ddq*dt2 + dq*dt;
-
     let mut lower_bounds = Vec::new();
     lower_bounds.push(constraints.joint_min);
     lower_bounds.push(constraints.joint_vel_min*dt + q);
@@ -149,10 +145,29 @@ fn compute_bounds(state: &State, constraints: &ParsedConstraints, dt: f64) -> ([
             upper_bound[j] = upper_bound[j].min(upper_bounds[i][j]);
         }
     }
-    println!("q: {:?}", q);
-    println!("dq: {:?}", dq);
-    println!("ddq: {:?}", ddq);
-    println!("Bounds: {:?}", Vector::from(upper_bound) - Vector::from(lower_bound));
+
+    for j in 0..7 {
+        let joint_lb = constraints.joint_min[j] + 0.2;
+        let joint_ub = constraints.joint_max[j] - 0.2;
+        if joint_lb >= lower_bound[j] {
+            lower_bound[j] = joint_lb.min(upper_bound[j]);
+        }
+        if joint_ub <= upper_bound[j] {
+            upper_bound[j] = joint_ub.max(lower_bound[j]);
+        }
+
+        if upper_bound[j] < lower_bound[j] {
+            println!("{}|{}", upper_bound[j] , lower_bound[j]);
+            println!("{},{},{}", q[j], dq[j], ddq[j]);
+            println!("{},{}", joint_lb, joint_ub);
+            panic!("");
+        }
+    }
+    
+    // println!("q: {:?}", q);
+    // println!("dq: {:?}", dq);
+    // println!("ddq: {:?}", ddq);
+    // println!("Bounds: {:?}", Vector::from(upper_bound) - Vector::from(lower_bound));
 
     (lower_bound, upper_bound)
 }

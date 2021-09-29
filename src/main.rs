@@ -62,7 +62,7 @@ fn main() {
     let mut state = initial_state(&[0.0, 0.0, 0.0, -1.5, 0.0, 1.5, 0.0]);
 
     let start = Instant::now();
-    let N = 1000;
+    let N = 10000;
     let dt = 1e-3;
     println!("{:?}", state.joint_position);
     for i in 0..N {
