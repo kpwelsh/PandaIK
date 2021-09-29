@@ -3,6 +3,7 @@ import sympy
 from sympy.polys.specialpolys import f_polys
 from sympy.simplify.fu import L
 from sympy.solvers import solve_rational_inequalities, reduce_inequalities, solve
+from sympy.solvers.inequalities import solve_poly_inequality
 q,qp,dq,ddq,dddq,qr,dqr,ddqr,dddqr,dt,t = sympy.symbols('q,qp,dq,ddq,dddq,qr,dqr,ddqr,dddqr,dt,t')
 
 # %%
@@ -332,4 +333,98 @@ plt.xlim([-10,10])
 
 
 
+# %%
+import math
+q,qp,dq,ddq,dddq,qr,dqr,ddqr,j,dt,t = sympy.symbols('q,qp,dq,ddq,dddq,qr,dqr,ddqr,j,dt,t', real = True)
+t = sympy.Symbol('t', nonnegative = True, real = True)
+dt = sympy.Symbol('dt', nonnegative = True, real = True)
+
+v = (qp - q) / dt
+a = (v - dq) / dt
+
+
+t = (-a + sympy.sqrt(a**2 - 2 * j * v)) / j
+eqn = qp + v * t + a * t**2 / 2 + j * t**3 / 6 - qr
+print(eqn)
+solve(eqn, qp)
+
+
+
+# %%
+
+v_max = 2.61
+a_max = 20
+j_max = 10000
+
+dt = 1e-3
+
+def delta_q(q, q0, v0):
+    v = (q - q0) / dt
+    a = (v - v0) / dt
+
+    jM = j_max
+    if a**2 + 2 * jM * v < 0:
+        jM *= -1
+    t = (a + np.sqrt(a**2 + 2 * jM * v)) / (jM)
+
+    return v * t + a * t**2 / 2 - jM * t**3 / 6
+
+def d_delta_q(q, q0, v0):
+    v = (q - q0) / dt
+    a = (v - v0) / dt
+    jM = j_max
+
+    if a**2 + 2 * jM * v < 0:
+        jM *= -1
+
+    t = (a + np.sqrt(a**2 + 2 * jM * v)) / (jM)
+    if t <= 0:
+        return 0
+
+
+    dtdq = 1/(dt**2 * jM) + (2 * a / dt**2 + 2 * jM / dt)  / (2 * jM * np.sqrt(a**2 + 2 * jM * v))
+
+    return t / dt + v * dtdq + (2 * a / dt*2) * t**2 / 2 + a * t * dtdq - jM * t**2 * dtdq / 2
+
+def bounds(q0, v0, a0):
+    q_star = q0 + v0 * dt + a0 * dt**2 / 2
+
+    top = qr - q_star - delta_q(q_star, q0, v0)
+    bottom = 1 + d_delta_q(q_star, q0, v0)
+    return top / bottom + q_star
+
+def instant_bounds(q0, v0, a0):
+    ub = qr
+
+    lb = max(-qr, q0 - dt * v_max, q0 - dt**2 * a_max + v0 * dt, q0 - dt**3 * j_max + dt**2 * a0 + dt * v0)
+    ub = min(qr, q0 + dt * v_max, q0 + dt**2 * a_max + v0 * dt, q0 + dt**3 * j_max + dt**2 * a0 + dt * v0)
+    return lb, ub
+
+
+max_stopping_time = 0.035
+print(max_stopping_time)
+tA = a_max / j_max
+max_stopping_time = tA + (v_max - j_max * tA**2 / 2) / a_max
+
+
+a = [0]
+v = [0]
+q = [0]
+for i in range(2000):
+    lb, ub = instant_bounds(q[-1], v[-1], a[-1])
+    ub = max(lb, min(qr-0.2, ub))
+    q.append(ub)
+    v.append((q[-1] - q[-2]) / dt)
+    a.append((v[-1] - v[-2]) / dt)
+i = np.argmax(q)
+j = i
+
+print(q[j], v[j], a[j])
+print(instant_bounds(q[j], v[j], a[j]))
+
+plt.plot(q, label = 'q')
+plt.plot(v, label = 'v')
+plt.plot(a, label = 'a')
+plt.ylim([-20,20])
+plt.legend()
 # %%
