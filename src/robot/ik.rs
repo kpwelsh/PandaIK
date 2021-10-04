@@ -1,20 +1,16 @@
 use std::f64::{INFINITY, NEG_INFINITY};
-use std::future;
 
-use hyperdual::Const;
-use k::{self, Constraints, UnitQuaternion};
-use optimization_engine::constraints::{Constraint, Rectangle};
+use k::{self, UnitQuaternion};
+use optimization_engine::constraints::{Rectangle};
 use optimization_engine::{constraints::NoConstraints, panoc::*, *};
 extern crate nalgebra as na;
-use na::{SimdPartialOrd, Vector, Vector3};
+use na::{Vector, Vector3};
 use crate::robot::state::{State};
-use crate::robot::constraints::{RobotConstraints, Vector7};
-use super::constraints::{JointConstraint, ParsedConstraints};
-use std::ops::Add;
+use crate::robot::constraints::{Vector7};
+use super::constraints::{ParsedConstraints};
 
 
 
-type CostFunctionType = dyn Fn(&[f64], &mut f64) -> Result<(), SolverError>;
 type Arm = k::SerialChain<f64>;
 
 
@@ -40,59 +36,6 @@ fn finite_difference(f: &dyn Fn(&[f64], &mut f64) -> Result<(), SolverError>, u:
 }
 
 
-fn joint_constraint_cost(u: &[f64], jcs: &[JointConstraint; 7]) -> f64 {
-    let mut c = 0.0;
-    for (&v, jc) in u.iter().zip(jcs) {
-        let center = jc.min.unwrap() + (jc.max.unwrap() - jc.min.unwrap()) / 2.;
-        let w = jc.max.unwrap() - jc.min.unwrap();
-        c += (2. * (v - center) / w).powf(50.);
-    }
-    c
-}
-
-
-fn finite_diff(lu: &[Option<f64>; 7], u: &[f64], dt: f64) -> [f64; 7] {
-    let mut vel = [0.0; 7];
-
-    for ((v, &olu), x) in vel.iter_mut().zip(lu).zip(u) {
-        *v = (x - olu.unwrap()) / dt;
-    }
-
-    vel
-}
-
-fn constraint_cost(constriants : &Option<RobotConstraints>, state: &State, u: &[f64], dt: f64) -> f64 {
-    let mut c = 0.0;
-
-    if let Some(constraints) = &constriants {
-        let vel = finite_diff(&state.joint_position, u, dt);
-        let accel = finite_diff(&state.joint_velocity, &vel, dt);
-        let jerk = finite_diff(&state.joint_acceleration, &accel, dt);
-
-        // Position Constraints
-        if let Some(jcs) = &constraints.joint_value {
-            c += joint_constraint_cost(u, &jcs);
-        }
-
-        // Velocity Constraints
-        if let Some(jcs) = &constraints.joint_vel {
-            c += joint_constraint_cost(&vel, &jcs);
-        }
-
-        // Acceleration Constraints
-        if let Some(jcs) = &constraints.joint_accel {
-            c += joint_constraint_cost(&accel, &jcs);
-        }
-
-        // Jerk Constraints
-        if let Some(jcs) = &constraints.joint_jerk {
-            c += joint_constraint_cost(&jerk, &jcs);
-        }
-    }
-    c
-}
-
-
 fn position_cost(current_position: &Vector3<f64>, desired_position: &Vector3<f64>) -> f64 {
     (current_position - desired_position).norm_squared()
 }
@@ -101,7 +44,7 @@ fn rotation_cost(current_rotation: &UnitQuaternion<f64>, desired_rotation: &Unit
     current_rotation.angle_to(desired_rotation).powf(2.0)
 }
 
-fn goal_cost(desired_state: &State, arm: &Arm, dt: f64) -> f64 {
+fn goal_cost(desired_state: &State, arm: &Arm) -> f64 {
     let mut c = 0.0;
     if let Some(name_transforms) = &desired_state.transforms {
         for named_trans in name_transforms.iter() {
@@ -119,66 +62,8 @@ fn goal_cost(desired_state: &State, arm: &Arm, dt: f64) -> f64 {
     c
 }
 
-fn div(a: &Vector7, b: &Vector7) -> Vector7 {
-    a.zip_map(b, |_a, _b| _a / _b)
-}
-
-fn clip(a: &Vector7, lb: &Vector7, ub: &Vector7) -> Vector7 {
-    a.sup(lb).inf(ub)
-}
-
 fn pow(a: &Vector7, p: f64) -> Vector7 {
     a.map(|_a| _a.powf(p))
-}
-
-
-fn max_j_v(v0: &Vector7, a0: &Vector7, v_max: &Vector7, j_max: &Vector7, dt: f64) -> Vector7 {
-    let jm = -j_max;
-    let A = -pow(&jm, -1.) * dt.powf(2.) / 2.;
-    let B = -(pow(&jm, -1.).component_mul(&a0) * dt).add_scalar(-dt.powf(2.));
-    let C = -(v_max - v0) + a0*dt - pow(&jm, -1.).component_mul(&pow(a0, 2.)) / 2.; 
-    (-B + pow(&(pow(&B, 2.) - 4. * A.component_mul(&C)), 0.5)).component_div(&(2. * A))
-}
-
-fn max_tA_j(dq: &Vector7, v0: &Vector7, a0: &Vector7, a_max: &Vector7, j_max: &Vector7, dt: f64) -> Vector7 {
-    let am = -a_max;
-    let jm = -j_max;
-    let tA = div(&am, &jm) - div(&clip(&(a0 ), &-a_max, &a_max), &jm);
-    let Vc = v0 + a0.component_mul(&tA.add_scalar(dt)) + jm.component_mul(&tA.component_mul(&tA)) / 2.;
-
-    let A = -div(&pow(&(dt * tA).add_scalar(dt.powf(2.)),2.), &(2. * am));
-    let B = (pow(&tA, 2.) + tA * dt.powf(2.)).add_scalar(dt.powf(3.)) - Vc.component_mul(&(tA * dt).add_scalar(dt.powf(2.))).component_div(&am);
-    let C = 
-        -dq + 
-        jm.component_mul(&pow(&tA, 3.)) / 6. +
-        a0.component_mul(&((pow(&tA, 2.) / 2. + dt * tA).add_scalar(dt.powf(2.)))) -
-        pow(&Vc, 2.).component_div(&(2. * am));
-    
-    (-B + pow(&(pow(&B, 2.) - 4. * A.component_mul(&C)), 0.5)).component_div(&(2. * A))
-}
-
-fn jerk_bound(q0: &Vector7, v0: &Vector7, a0: &Vector7, constraints: &ParsedConstraints, dt: f64) -> (Vector7, Vector7) {
-    let zeros = Vector7::from([0.; 7]);
-    let buffer = Vector7::from([1e-5; 7]);
-    let dq = (constraints.joint_max - q0).sup(&zeros);
-
-    let max_j = 
-        ((constraints.joint_accel_max - a0 - buffer) / dt)
-        .inf(&( (dq - v0 * dt - a0 * dt.powf(2.)) / dt.powf(3.) ))
-        .inf(&max_j_v(v0, a0, &constraints.joint_vel_max, &constraints.joint_jerk_max, dt))
-        .inf(&max_tA_j(&dq, v0, a0, &constraints.joint_accel_max, &constraints.joint_jerk_max, dt));
-
-
-
-    let dq = (-constraints.joint_min + q0).sup(&zeros);
-    let min_j = 
-        ((constraints.joint_accel_max + a0 + buffer) / dt)
-        .inf(&( (dq + v0 * dt + a0 * dt.powf(2.)) / dt.powf(3.) ))
-        .inf(&max_j_v(&-v0, &-a0, &constraints.joint_vel_max, &constraints.joint_jerk_max, dt))
-        .inf(&max_tA_j(&dq, &-v0, &-a0, &constraints.joint_accel_max, &constraints.joint_jerk_max, dt));
-
-
-    (-min_j, max_j)
 }
 
 fn stopping_distance(v0: &Vector7, a0: &Vector7, constraints: &ParsedConstraints, dt: f64) -> Vector7 {
@@ -189,31 +74,31 @@ fn stopping_distance(v0: &Vector7, a0: &Vector7, constraints: &ParsedConstraints
     let jm = -constraints.joint_jerk_max;
     let am = -constraints.joint_accel_max;
     
-    let tA = (am - a).component_div(&jm);
-    let vA = v + a.component_mul(&tA) + jm.component_mul(&pow(&tA, 2.)) / 2.;
+    let t_a = (am - a).component_div(&jm);
+    let v_a = v + a.component_mul(&t_a) + jm.component_mul(&pow(&t_a, 2.)) / 2.;
 
-    let qA = q + v.component_mul(&tA) + a.component_mul(&pow(&tA, 2.)) / 2. + jm.component_mul(&pow(&tA, 3.)) / 6.;
-    let tV = - vA.component_div(&am);
-    let qTV = qA + vA.component_mul(&tV) + am.component_mul(&pow(&tV, 2.)) / 2.;
+    let q_a = q + v.component_mul(&t_a) + a.component_mul(&pow(&t_a, 2.)) / 2. + jm.component_mul(&pow(&t_a, 3.)) / 6.;
+    let t_v = - v_a.component_div(&am);
+    let qt_v = q_a + v_a.component_mul(&t_v) + am.component_mul(&pow(&t_v, 2.)) / 2.;
 
-    let A = -27. * pow(&(jm / 6.), 2.);
-    let B = 18. * (jm / 6.).component_mul(&(a / 2.)).component_mul(&v)
+    let _a = -27. * pow(&(jm / 6.), 2.);
+    let _b = 18. * (jm / 6.).component_mul(&(a / 2.)).component_mul(&v)
         - 4. * pow(&(a / 2.), 3.);
-    let C = pow(&(a / 2.), 2.).component_mul(&pow(&v, 2.))
+    let _c = pow(&(a / 2.), 2.).component_mul(&pow(&v, 2.))
         - 4. * (jm / 6.).component_mul(&pow(&v, 3.));
     
-    let desc = pow(&B, 2.) - 4. * A.component_mul(&C);
+    let desc = pow(&_b, 2.) - 4. * _a.component_mul(&_c);
 
 
     let mut res = Vector7::from([0.; 7]);
     for i in 0..7 {
-        if vA[i] > 0. {
-            res[i] = qTV[i];
+        if v_a[i] > 0. {
+            res[i] = qt_v[i];
         } else {
             if desc[i] < 0. {
                 res[i] = 0.;
             } else {
-                res[i] = (-B[i] + (B[i].powf(2.) - 4. * A[i] * C[i]).sqrt()) / (2. * A[i]);
+                res[i] = (-_b[i] + (_b[i].powf(2.) - 4. * _a[i] * _c[i]).sqrt()) / (2. * _a[i]);
             }
         }
     }
@@ -237,7 +122,6 @@ fn compute_bounds(state: &State, constraints: &ParsedConstraints, dt: f64) -> ([
     let dt3 = dt2 * dt;
 
     let zeros = Vector7::from([0.; 7]);
-    let s = 0.9;
     let buffer = Vector7::from([1e-4;7]);
     let suqb = constraints.joint_max - buffer - stopping_distance(&dq, &ddq, constraints, dt);
     let slqb = constraints.joint_min + buffer + stopping_distance(&-dq, &-ddq, constraints, dt);
@@ -320,7 +204,6 @@ fn compute_bounds(state: &State, constraints: &ParsedConstraints, dt: f64) -> ([
 pub struct Controller {
     panoc_cache : PANOCCache,
     arm : Arm,
-    last_state : Option<State>,
     constriants : Option<ParsedConstraints>
 }
 
@@ -329,43 +212,21 @@ impl Controller {
         Controller {
             panoc_cache : panoc::PANOCCache::new(7, 1e-4, 100),
             arm: arm,
-            last_state: None,
             constriants: constraints
         }
-    }
-    
-    pub fn set_state(&mut self, state: State) {
-        self.last_state = Some(state);
     }
 
     pub fn update(&mut self, state: &State, desired_state: &State, dt: f64) -> [f64; 7] {
 
         let arm = &mut self.arm;
 
-
-        let mut ub = [INFINITY; 7];
-        let mut lb = [NEG_INFINITY; 7];
-
-        if let Some(constraints) = &self.constriants {
-            for i in 0..7 {
-                ub[i] = ub[i].min(constraints.joint_max[i]);
-                lb[i] = lb[i].max(constraints.joint_min[i]);
-            }
-        }
-
         let cost = |u: &[f64], c: &mut f64| {
-
-            // let mut clipped = [0.; 7];
-            // for i in 0..7 {
-            //     clipped[i] = u[i].max(lb[i]).min(ub[i]);
-            // }
-
             if let Err(err) = arm.set_joint_positions(u) {
                 println!("{}|{:?}", err, u);
                 panic!();
             }
             arm.update_transforms();
-            *c += goal_cost(desired_state, &arm, dt);
+            *c += goal_cost(desired_state, &arm);
             Ok(())
         };
 
@@ -379,7 +240,6 @@ impl Controller {
             *ui = qi.unwrap();
         }
         
-        let status;
 
         if let Some(constraints) = &self.constriants {
             let (lb, ub) = compute_bounds(state, constraints, dt);
@@ -391,7 +251,7 @@ impl Controller {
             );
             let mut panoc = PANOCOptimizer::new(problem, &mut self.panoc_cache)
                                 .with_max_iter(10);
-            status = panoc.solve(&mut u).unwrap();
+            panoc.solve(&mut u).unwrap();
         } else {
             let bounds = NoConstraints::new();
             let problem = Problem::new(
@@ -401,7 +261,7 @@ impl Controller {
             );
             let mut panoc = PANOCOptimizer::new(problem, &mut self.panoc_cache)
                                 .with_max_iter(10);
-            status = panoc.solve(&mut u).unwrap();
+            panoc.solve(&mut u).unwrap();
         }
         u
     }

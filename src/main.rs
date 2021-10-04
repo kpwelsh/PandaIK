@@ -3,7 +3,7 @@ use std::time::{Instant};
 
 mod robot;
 use robot::state::{State, NamedTransform};
-use robot::constraints::{RobotConstraints, ParsedConstraints};
+use robot::constraints::{ParsedConstraints};
 
 extern crate nalgebra as na;
 use na::{Vector3};
@@ -53,7 +53,7 @@ fn main() {
     let mut controller = robot::ik::Controller::new(arm, Some(ParsedConstraints::from_robot_constraints(constraints)));
 
 
-    let mut goal = NamedTransform {
+    let goal = NamedTransform {
         name: "panda_joint8".to_string(),
         position: Some(Vector3::from([-10., 0.0, 0.4])),
         rotation: None
@@ -62,10 +62,10 @@ fn main() {
     let mut state = initial_state(&[0.0, 0.0, 0.0, -1.5, 0.0, 1.5, 0.0]);
 
     let start = Instant::now();
-    let N = 10000;
+    let n = 10000;
     let dt = 1e-3;
     println!("{:?}", state.joint_position);
-    for i in 0..N {
+    for _i in 0..n {
 
         let mut desired_state = State::new();
         desired_state.transforms = Some(vec![goal.clone()]);
@@ -75,5 +75,5 @@ fn main() {
     }
     println!("{:?}", state.joint_position);
     let duration = start.elapsed();
-    println!("{}", 1e6 * N as f64 / (duration.as_micros() as f64));
+    println!("{}", 1e6 * n as f64 / (duration.as_micros() as f64));
 }
