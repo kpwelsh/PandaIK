@@ -4,7 +4,7 @@ use serde::{Serialize, Deserialize};
 extern crate nalgebra as na;
 use na::{Vector, Matrix};
 
-type Vector7 = Matrix<f64, na::U7, na::U1, na::ArrayStorage<f64, 7_usize, 1_usize>>;
+pub type Vector7 = Matrix<f64, na::U7, na::U1, na::ArrayStorage<f64, 7_usize, 1_usize>>;
 
 pub struct ParsedConstraints {
     pub joint_min : Vector7,
@@ -36,6 +36,8 @@ impl Default for ParsedConstraints {
 
 impl ParsedConstraints {
     pub fn from_robot_constraints(rc: RobotConstraints) -> Self {
+        let buffer = Vector7::from([1e-3; 7]);
+
         let mut this = Self{..Default::default()};
 
         let extract_bounds = |jcs: &[JointConstraint; 7]| {
@@ -50,23 +52,23 @@ impl ParsedConstraints {
 
         if let Some(jv) = rc.joint_value {
             let (lower, upper) = extract_bounds(&jv);
-            this.joint_min = lower;
-            this.joint_max = upper;
+            this.joint_min = lower + buffer;
+            this.joint_max = upper - buffer;
         };
         if let Some(jv) = rc.joint_vel {
             let (lower, upper) = extract_bounds(&jv);
-            this.joint_vel_min = lower;
-            this.joint_vel_max = upper;
+            this.joint_vel_min = lower + buffer;
+            this.joint_vel_max = upper - buffer;
         };
         if let Some(jv) = rc.joint_accel {
             let (lower, upper) = extract_bounds(&jv);
-            this.joint_accel_min = lower;
-            this.joint_accel_max = upper;
+            this.joint_accel_min = lower + buffer;
+            this.joint_accel_max = upper - buffer;
         };
         if let Some(jv) = rc.joint_jerk {
             let (lower, upper) = extract_bounds(&jv);
-            this.joint_jerk_min = lower;
-            this.joint_jerk_max = upper;
+            this.joint_jerk_min = lower + buffer;
+            this.joint_jerk_max = upper - buffer;
         };
 
         this

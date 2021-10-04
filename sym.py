@@ -1,354 +1,39 @@
 # %%
-import sympy
-from sympy.polys.specialpolys import f_polys
-from sympy.simplify.fu import L
-from sympy.solvers import solve_rational_inequalities, reduce_inequalities, solve
-from sympy.solvers.inequalities import solve_poly_inequality
-q,qp,dq,ddq,dddq,qr,dqr,ddqr,dddqr,dt,t = sympy.symbols('q,qp,dq,ddq,dddq,qr,dqr,ddqr,dddqr,dt,t')
-
-# %%
-
-dqp = (qp - q) / dt
-ddqp = (dqp - dq) / dt
-dddqp = (ddqp - ddq) / dt
-
-ineqs = [
-    qp <= qr,
-    dqp <= dqr,
-    ddqp <= ddqr,
-    ddqp <= dddqr
-]
-
-qt = q + dqp * t + ddqp * t**2 / 2 + dddqp * t**3 / 6
-
-qtprime = qt.diff(t)
-for s in solve(qt.diff(t), t):
-    extremum = qt.subs(t, s)
-    ineqs.append(sympy.simplify(qt.subs(t, extremum) <= qr))
-
-print(ineqs)
-# %%
-reduce_inequalities(ineqs, qp)
-
-# %%
 import numpy as np
 import matplotlib.pyplot as plt
-
-v_max = 2.61
-a_max = 20
-j_max = 12
-
-
-# Velocity Distance
-def velocity_stopping_distance(a0):
-    return a0**2 / (2 * j_max)
-
-
-a0 = -2
-v0 = velocity_stopping_distance(a0)
-
-t = np.linspace(0, 0.5, 50)
-v = lambda t: v0 + a0 * t + j_max * t **2 / 2
-t_min = (-a0 + np.sqrt(a0**2 - 2 * j_max * v0)) / (j_max)
-a = lambda t: a0 + j_max * t
-print(t_min)
-print(v(t_min))
-print(a(t_min))
-plt.plot(t, v(t))
-plt.plot(t, a(t))
-
-
-# %%
-from scipy.optimize import minimize_scalar
-
-# qt = q + dq t + ddq t^2 / 2 + dddq t^3 / 6
-# Want qr - qt to have 1 root
-
-def descriminant(a,b,c,d):
-    return (
-        (4 * (b**2 - 3 * a * c)**3 - (2 * b**3 - 9 * a * b * c + 27 * a**2 * d)**2) / (27 * a **2)
-    )
-
-a = j_max / 6
-b = -a_max / 2 / 2
-c = -v_max + velocity_stopping_distance(-a_max / 2)
-print(a, b, c)
-#d = 50
-
-A = (-27 * a**2)
-B = (18 * a * b * c - 4 * b**3)
-C = (b**2 * c**2 - 4 * a * c**3)
-
-desc = B**2 - 4 * A * C
-
-d = -(B + np.sqrt(desc)) / (2 * A)
-print(f'Desc: {desc}, {A * d**2 + B * d + C}')
-
-t = np.linspace(0, 5, 50)
-
-qt = lambda t: a * t**3 + b * t**2 + c * t + d
-vt = lambda t: 3 * a * t**2 + 2 * b * t + c
-at = lambda t: 6 * a * t + 2 * b
-
-t_min = minimize_scalar(qt, bounds = [0, np.inf])['x']
-print(t_min)
-
-print(qt(t_min))
-print(vt(t_min))
-print(at(t_min))
-
-plt.plot(t, qt(t))
-
-plt.plot(t, vt(t))
-plt.plot(t, at(t))
-
-# accel = np.clip(-20 + 12 * t, -20, 20)
-# plt.plot(t, accel)
-# vel = np.clip(-2.61 + np.cumsum(accel) * dt, -2.61, 2.61)
-# plt.plot(t, vel)
-# p = d + np.cumsum(vel) * dt
-# plt.plot(t, p)
-
-plt.show()
-
-
-
-# %%
-
-
-v_max = 2.61
-a_max = 20
-j_max = 12
-
-t_mid = 1
-t = np.linspace(0, 2 * t_mid, 50)
-
-v0 = 0
-a0 = -10
-v = v0 + a0 * t + j_max * t**2 / 2
-v5 = v0 + a0 * t_mid + j_max * (t_mid)**2 / 2
-a5 = a0 + j_max * t_mid
-v[t > t_mid] =  v5 + a5 * (t[t>t_mid]-t_mid) - j_max * (t[t>t_mid] - t_mid)**2 / 2
-
-plt.plot(t, v)
-
-# %%
-
-v_max = 2.61
-a_max = 20
-j_max = 12
-
-t_mid = 2
-t = np.linspace(0, 5, 50)
-
-q0 = 0
-v0 = -5
-a0 = -10
-q = q0 + v0 * t + a0 * t**2 / 2 + j_max * t**3 / 6
-qmid = q0 + v0 * (t_mid) + a0 * (t_mid)**2 / 2 + j_max * (t_mid)**3 / 6
-vmid = v0 + a0 * t_mid + j_max * t_mid**2 / 2
-amid = a0 + j_max * t_mid
-q[t > t_mid] = qmid + vmid * (t[t>t_mid] - t_mid) + amid * (t[t>t_mid] - t_mid)**2 / 2 - j_max * (t[t>t_mid] - t_mid)**3 / 6
-
-v = v0 + a0 * t + j_max * t**2 / 2
-v5 = v0 + a0 * t_mid + j_max * (t_mid)**2 / 2
-a5 = a0 + j_max * t_mid
-v[t > t_mid] =  v5 + a5 * (t[t>t_mid]-t_mid) - j_max * (t[t>t_mid] - t_mid)**2 / 2
-
-plt.plot(q, v)
+from scipy.optimize import curve_fit
 
 
 # %%
 
 v_max = 2.61
-a_max = 20
-j_max = 12
+a_max = 7.5
+j_max = 3750
+dt = 1e-3
+def max_distance(v0, a0):
+    q = 0
+    v = v0
+    a = a0
+    max_a = abs(a)
+    max_v = abs(v)
+    while v > 0 or a > 0:
+        dq = max(-v_max * dt, v * dt - a_max * dt**2, v * dt + a * dt**2 - j_max * dt**3)
+        q = q + dq
+        a = (dq / dt - v) / dt
+        v = dq / dt
 
-class SecondOrderController:
-    def __init__(self, max_a, max_v):
-        self.A = max_a
-        self.V = max_v
-        self.X0 = None
-        self.V0 = None
-        self.T1 = None
-        self.T2 = None
-        self.T3 = None
-    
-    def set_init(self, x, v):
-        self.X0 = x
-        self.V0 = v
-
-    def set_goal(self, x, v):
-        self.XG = x
-        self.VG = v
-    
-    def update(self):
-        dt1 = (self.V - self.V0) / self.A
-        dt3 = self.V / self.A
-        dt2 = (self.XG - (self.X0 + dt1 + dt3)) / self.V
-
-        d = 1
-
-        if dt2 < 0:
-            v = np.sqrt(d * self.A * (self.XG - self.X0) + self.V0**2 / 2)
-            dt2 = 0
-            dt1 = (v - d * self.V0) / self.A
-            dt3 = v / self.A
-        
-        self.T1 = dt1
-        self.T2 = self.T1 + dt2
-        self.T3 = self.T2 + dt3
-
-
-
-def poly_bounds(a,b,c,d,t_min,t_max):
-    f0 = a * t_min ** 3 + b * t_min**2 + c * t_min + d
-    f1 = a * t_max ** 3 + b * t_max**2 + c * t_max + d
-
-    extremes = []
-    if a == 0:
-        if b == 0:
-            extremes.append(0)
-        else:
-            extremes.append(-c / (2*b))
-    else:
-        extremes.append((-2*b + np.sqrt((2*b)**2 - 4 * (3*a) * c)) / (2 * (3*a)))
-        extremes.append((-2*b - np.sqrt((2*b)**2 - 4 * (3*a) * c)) / (2 * (3*a)))
-
-    extreme_values = [f0, f1]
-    for t in extremes:
-        if t > t_min and t < t_max:
-            extreme_values.append(a * t ** 3 + b * t**2 + c * t + d)
-    return min(*extreme_values), max(*extreme_values)
-
-
-def second_order_bounds(v0, a0):
-
-    stopping_time = np.abs(a0 / j_max)
-    stopping_v = v0 + stopping_time * a0 - np.sign(a0) * stopping_time ** 2 * j_max / 2
-
-    d = np.sign(-stopping_v)
-
-    dt1 = (a_max - a0) / j_max
-    dv1 = d * j_max * dt1**2 / 2 + a0 * dt1
-    dt3 = (a_max) / j_max
-    dv3 = -d * j_max * dt3**2 / 2 + d * a_max * dt3
-    dt2 = (-v0 - (dv1 + dv3)) / a_max
-
-
-    if dt2 < 0:
-        a = np.sqrt(d * j_max * (-v0) + 0.5 * a0**2)
-        dt2 = 0
-        dt1 = (a - d * a0) / j_max
-        dt3 = a / j_max
-    
-    x1t = lambda t: v0 * t + a0 * t**2 / 2 + d * j_max * t**3 / 6
-    v1t = lambda t: v0 + a0 * t + d * j_max * t**2 / 2
-    a1t = lambda t: a0 + d * j_max * t
-
-    x2t = lambda t: x1t(dt1) + v1t(dt1) * (t - dt1) + a1t(dt1) * (t - dt1) ** 2 / 2
-    v2t = lambda t: v1t(dt1) + a1t(dt1) * (t - dt1)
-    a2t = lambda t: a1t(dt1)
-
-    x3t = lambda t: x2t(dt1 + dt2) + v2t(dt1 + dt2) * (t - (dt1 + dt2)) + a2t(dt1 + dt2) * (t - (dt1 + dt2)) ** 2 / 2 - d * j_max * (t - (dt1 + dt2))**3 / 6
-    v3t = lambda t: v2t(dt1 + dt2) + a2t(dt1 + dt2) * (t - (dt1 + dt2)) - d * j_max * (t - (dt1 + dt2))**2 / 2
-    a3t = lambda t: a2t(dt1 + dt2) - d * j_max * (t - (dt1 + dt2))
-
-    def val(t):
-        if t < dt1:
-            return x1t(t), v1t(t), a1t(t)
-        elif t < dt1 + dt2:
-            return x2t(t), v2t(t), a2t(t)
-        else:
-            return x3t(t), v3t(t), a3t(t)
-
-    T = np.linspace(0, dt1, 50)
-    #plt.plot(T, [a1t(t) for t in T])
-
-    bounds_x = list(zip(*[
-        poly_bounds(d * j_max / 6, a0 / 2, v0, 0, 0, dt1),
-        poly_bounds(-d * j_max / 6, a2t(dt1+dt2) / 2, v2t(dt1+dt2), x2t(dt1+dt2), 0, dt3),
-    ]))
-    bounds_v = list(zip(*[
-        poly_bounds(0, d * j_max / 2, a0, v0, 0, dt1),
-        poly_bounds(0, -d * j_max / 2, a2t(dt1+dt2), v2t(dt1+dt2), 0, dt3)
-    ]))
-    print(bounds_x)
-    print(bounds_v)
-    return val
-
-
-
-v0 = -1
-a0 = -5
-d = 1
-
-
-dt1 = (a_max - a0) / j_max
-dv1 = d * j_max * dt1**2 / 2 + a0 * dt1
-dt3 = (a_max) / j_max
-dv3 = -d * j_max * dt3**2 / 2 + d * a_max * dt3
-dt2 = (-v0 - (dv1 + dv3)) / a_max
-
-if dt2 < 0:
-    a = np.sqrt(d * j_max * (-v0) + 0.5 * a0**2)
-    dt2 = 0
-    dt1 = (a - d * a0) / j_max
-    dt3 = a / j_max
-print(dt1, dt2, dt3)
-
-
-t = np.linspace(0, dt1 + dt2 + dt3, 500)
-
-vt = np.zeros_like(t)
-v1 = v0 + a0 * dt1 + j_max * dt1**2 / 2
-a1 = a0 + j_max * dt1
-
-v2 = v1 + a1 * dt2
-a2 = a1
-
-v3 = v2 + a2 * dt3 - j_max * dt3**2 / 2
-a3 = a2 - j_max * dt3
-
-jt = np.zeros_like(t)
-jt[t < dt1] = d * j_max
-jt[(t > dt1) & (t < (dt1+dt2))] = 0
-jt[(t > (dt1+dt2))] = - d * j_max
-
-val = second_order_bounds(v0, a0)
-
-dt = t[1] - t[0]
-vt = np.cumsum(np.cumsum(jt) * dt + a0) * dt + v0
-# plt.plot(t, vt)
-# plt.plot(t, np.cumsum(vt * dt))
-
-# plt.plot(t, [val(_t)[0] for _t in t], linestyle = '--')
-# plt.plot(t, [val(_t)[1] for _t in t], linestyle = '--')
-plt.plot(np.cumsum(vt * dt), vt, linestyle = '--')
-
-plt.ylim([-2.61,2.61])
-plt.xlim([-10,10])
-
-
-
-
-
+        max_a = max(max_a, abs(a))
+        max_v = max(max_v, abs(v))
+    return q
+V = np.linspace(0, v_max, 50)
+for a0 in np.linspace(-20, 20, 5):
+    y = [max_distance(v, a0) for v in V]
+    plt.plot(y, V, label = str(a0))
+    print(curve_fit(lambda x, a, b: a * np.sqrt(x) + b, y, V)[0])
+#plt.legend()
+#print(1.1/ (2 * a_max) - np.polyfit(V, y, 2)[0])
 # %%
-import math
-q,qp,dq,ddq,dddq,qr,dqr,ddqr,j,dt,t = sympy.symbols('q,qp,dq,ddq,dddq,qr,dqr,ddqr,j,dt,t', real = True)
-t = sympy.Symbol('t', nonnegative = True, real = True)
-dt = sympy.Symbol('dt', nonnegative = True, real = True)
-
-v = (qp - q) / dt
-a = (v - dq) / dt
-
-
-t = (-a + sympy.sqrt(a**2 - 2 * j * v)) / j
-eqn = qp + v * t + a * t**2 / 2 + j * t**3 / 6 - qr
-print(eqn)
-solve(eqn, qp)
-
-
+plt.plot(V, 0.025 * V**2)
 
 # %%
 
@@ -356,75 +41,432 @@ v_max = 2.61
 a_max = 20
 j_max = 10000
 
+print(a_max * dt - j_max * dt**2)
+
 dt = 1e-3
+def max_velocity(a0):
+    v = 0
+    a = a0
+    while a > 0:
+        dv = min(a * dt - j_max * dt**2, a**2 / (2 * j_max))
+        v = v + dv
+        a = dv / dt
 
-def delta_q(q, q0, v0):
-    v = (q - q0) / dt
-    a = (v - v0) / dt
+    return v
 
-    jM = j_max
-    if a**2 + 2 * jM * v < 0:
-        jM *= -1
-    t = (a + np.sqrt(a**2 + 2 * jM * v)) / (jM)
+A = np.linspace(0, a_max, 50)
+y = [max_velocity(a) for a in A]
+#plt.plot(A, y)
+print(np.polyfit(A, y, 2))
+c = (1 / (2 * j_max))
+vl = -v_max
+vr = v_max
+v = np.linspace(vl, vr, 500)
+def upper_bound(v):
+    return (2 * c * v - dt**2 + np.sqrt((2 * c * v - dt**2)**2 + 4 * c * (dt**2 * vr - c * v**2))) / (2 * c)
 
-    return v * t + a * t**2 / 2 - jM * t**3 / 6
+def lower_bound(v):
+    return (2 * c * v + dt**2 - np.sqrt((2 * c * v + dt**2)**2 + 4 * c * (-dt**2 * vl - c * v**2))) / (2 * c)
 
-def d_delta_q(q, q0, v0):
-    v = (q - q0) / dt
-    a = (v - v0) / dt
-    jM = j_max
 
-    if a**2 + 2 * jM * v < 0:
-        jM *= -1
+plt.plot(v, upper_bound(v) - v)
+plt.plot(v, lower_bound(v) - v)
 
-    t = (a + np.sqrt(a**2 + 2 * jM * v)) / (jM)
-    if t <= 0:
+# %%
+
+vs = [0]
+ass = [0]
+v = vs[-1]
+a = ass[-1]
+
+for i in range(2000):
+    dv = min(a_max * dt, a * dt + j_max * dt**2, upper_bound(v) - v)
+    v = v + dv
+    a = dv/dt
+
+    vs.append(v)
+    ass.append(a)
+
+plt.plot(vs)
+plt.plot(ass)
+
+print(np.max(np.abs(vs)))
+print(np.max(np.abs(ass)))
+
+
+# %%
+c = 0.025
+c = 1 / (2 * (a_max))
+d = 1e-3
+qr = np.pi
+ql = -qr
+q = np.linspace(ql, qr, 500)
+v = np.linspace(-v_max, v_max, 500)
+jm = j_max
+def upper_bound(q):
+    return q - a_max * dt**2 - d * dt + np.sqrt((q - a_max * dt**2 - d * dt) ** 2 - (q**2 - 2 * a_max * dt**2 * qr - d * dt * q))
+
+def lower_bound(q):
+    return q + a_max * dt**2 - d * dt - np.sqrt((q + a_max * dt**2 - d * dt) ** 2 - (q**2 - 2 * a_max * dt**2 * (-ql) - d * dt * q))
+
+
+def upper_bound_v(v):
+    return v - jm * dt**2 - d * dt + np.sqrt((v - jm * dt**2 - d * dt) ** 2 - (v**2 - 2 * jm * (dt**2) * v_max - d * dt * v))
+
+def lower_bound_v(v):
+    return v + jm * dt**2 - d * dt - np.sqrt((v + jm * dt**2 - d * dt) ** 2 - (v**2 - 2 * jm * (dt**2) * v_max - d * dt * v))
+
+
+plt.plot(q, upper_bound(q) - q)
+plt.plot(q, lower_bound(q) - q)
+plt.figure()
+plt.plot(v, upper_bound_v(v) - v)
+plt.plot(v, lower_bound_v(v) - v)
+
+# %%
+qs = [0]
+vs = [0]
+ass = [0]
+js = [0]
+q = qs[-1]
+v = vs[-1]
+a = ass[-1]
+for i in range(20000):
+
+    uvb = upper_bound_v(v)
+    lvb = lower_bound_v(v)
+
+    max_dq = min(uvb * dt, v * dt + a_max * dt**2, v * dt + a * dt**2 + j_max * dt**3, upper_bound(q) - q)
+    min_dq = max(lvb * dt, v * dt - a_max * dt**2, v * dt + a * dt**2 - j_max * dt**3, lower_bound(q) - q)
+
+    if max_dq < min_dq:
+        print(q, v, a)
+        print(uvb, lvb)
+        print(max_dq, min_dq)
+    dq = 1 * (max_dq - min_dq) + min_dq
+    q = q + dq
+    a = (dq / dt - v) / dt
+    v = dq / dt
+
+    qs.append(q)
+    vs.append(v)
+    ass.append(a)
+    js.append((ass[-1] - ass[-2]) / dt)
+
+plt.plot(qs)
+plt.plot(vs)
+plt.plot(ass)
+plt.plot(js)
+
+print(np.max(np.abs(qs)))
+print(np.max(np.abs(vs)))
+print(np.max(np.abs(ass)))
+print(np.max(np.abs(js)))
+
+# %%
+q_max = np.pi
+v_max = 2.61
+a_max = 20
+j_max = 10000
+dt = 1e-4
+
+def max_v(dq, a):
+    if abs(a) > 0:
+        a = np.clip(a + j_max * (a / abs(a)) * dt, -a_max, a_max)
+    jm = -j_max
+    am = -a_max
+    tA = (am - a) / jm
+    A = 1
+    B = -2 * am * tA + 2 * a * tA + jm * tA**2
+    C = 2 * am * dq - 2 * am * (a * tA**2 / 2 + jm * tA**3 / 6) + a**2 * tA**2 + a * tA * jm * tA * tA + jm**2 * tA**4 / 4
+
+    #print(A, B, C)
+    vm = (-B + np.sqrt(B**2 - 4 * A * C)) / (2 * A)
+    # qa = vm * tA + a * tA**2 / 2 + jm * tA**3 / 6
+
+    # va = vm + a * tA + jm * tA**2 / 2
+    # tB = -va / am
+    # qb = qa + va * tB + am * tB**2 / 2 
+    # print(qa, qb)
+    return np.clip(vm, -v_max, v_max)
+
+def max_a(dv):
+    jm = -j_max
+    return np.clip(np.sqrt(-2 * jm * dv) / 4, -a_max, a_max)
+
+dq = np.linspace(0, np.pi, 500)
+
+for a in np.linspace(-a_max, a_max, 4):
+    plt.plot(dq, other_max_v(dq, a))
+#plt.plot(dq, max_v(dq))
+
+# %%
+
+qs = [0]
+vs = [0]
+ass = [0]
+js = [0]
+q = qs[-1]
+v = vs[-1]
+a = ass[-1]
+for i in range(50000):
+
+    uvb = max_v(q_max - q, a)
+    lvb = -max_v(q + q_max, a)
+
+    uab = max_a(uvb - v)
+    lab = -max_a(v - lvb)
+
+    ujb = np.clip((uab - a) / dt, -j_max, j_max)
+
+    ljb = np.clip((lab - a) / dt, -j_max, j_max)
+
+    max_dq = min(uvb * dt, v * dt + uab * dt**2, v * dt + a * dt**2 + ujb * dt**3)
+    min_dq = max(lvb * dt, v * dt + lab * dt**2, v * dt + a * dt**2 + ljb * dt**3)
+
+    if max_dq < min_dq:
+        print(q, v, a)
+        print(uvb, lvb)
+        print(uab, lab)
+        print(ujb, ljb)
+        print('max da: ', ljb * dt)
+        print(max_dq, min_dq)
+        print((uvb * dt, v * dt + uab * dt**2, v * dt + a * dt**2 + ujb * dt**3))
+        print((lvb * dt, v * dt + lab * dt**2, v * dt + a * dt**2 + ljb * dt**3))
+        break
+    dq = (1) * (max_dq - min_dq) + min_dq
+    q = q + dq
+    a = (dq / dt - v) / dt
+    v = dq / dt
+
+    qs.append(q)
+    vs.append(v)
+    ass.append(a)
+    js.append((ass[-1] - ass[-2]) / dt)
+
+plt.plot(qs)
+plt.plot(vs)
+plt.plot(ass)
+#plt.plot(js)
+
+print(np.max(np.abs(qs)))
+print(np.max(np.abs(vs)))
+print(np.max(np.abs(ass)))
+print(np.max(np.abs(js)))
+
+# %%
+from scipy.optimize import minimize_scalar, root_scalar
+
+q_max = np.pi
+v_max = 2.61
+a_max = 7.5
+j_max = 3750
+dt = 1e-4
+
+
+v0 = np.linspace(0, 2.61, 500)
+a0 = a_max
+
+def max_j_v(v0,a0):
+    jm = -j_max
+    A = -dt**2 / (2 * jm)
+    B = dt**2 - a0 * dt / jm
+    C = -(v_max - v0) + a0 * dt - a0**2 / (2 * jm)
+    return np.clip((-B + np.sqrt(B**2 - 4 * A * C)) / (2 * A), -j_max, j_max)
+
+
+def max_tA_j(dq, v0, a0):
+    am = -a_max
+    jm = -j_max
+
+    tA = am / jm - (np.clip(a0 + j_max * dt, -a_max, a_max)) / jm
+    #tA = (am - a0) / jm + dt
+    Vc = v0 + a0 * (dt + tA) + jm * tA**2 / 2
+    A = -(dt**2 + dt * tA)**2 / (2 * am)
+    B = (dt**3 + dt**2 * tA + dt * tA**2) - Vc * (dt**2 + dt * tA) / (am)
+    C = -dq + jm * tA**3 / 6 + v0 * (dt + tA) + a0 * (dt**2 + dt * tA + tA**2 / 2) - Vc**2 / (2*am)
+    return (-B + np.sqrt(B**2 - 4 * A * C)) / (2 * A)
+
+def max_j_q(dq,v0,a0):
+    return (dq - v0 * dt - a0 * dt**2) / dt**3
+
+def max_j_a(da):
+    return (da-1e-5) / dt
+
+
+def total_max_j(dq, v0, a0, da):
+    dq = np.clip(dq, 0, np.inf)
+    return min(max_j_q(dq, v0, a0), max_j_v(v0, a0), max_tA_j(dq, v0, a0), max_j_a(da))
+
+dq = np.linspace(0, np.pi, 500)
+#plt.plot(dq, np.clip(max_tA_j(dq, v0, a0), -j_max, j_max))
+a0 = np.linspace(-0, 1e-4, 50)
+plt.plot(a0, max_tA_j(0, 0, a0))
+
+
+# %%
+v_max = 2.61
+a_max = 7.5
+j_max = 3750
+
+
+def stopping_distance(v0, a0):
+    q = v0 * dt + a0 * dt**2 + j_max * dt**3
+    v = v0 + a0 * dt + j_max * dt**2
+    a = a0 + j_max * dt
+    jm = -j_max
+    am = -a_max
+
+    tA = (am - a) / jm
+    vA = v + a * tA + jm * tA**2 /2
+    if vA > 0:
+        qA = q + v * tA + a * tA**2 / 2 + jm * tA**3 / 6
+        tV = - vA / am
+        return qA + vA * tV + am * tV **2 / 2
+    
+ 
+    A = - 27 * (-jm / 6)**2
+    B = 18 * (-jm / 6 * a / 2 * v) - 4 * (a / 2)**3
+    C = (a / 2)**2 * v**2 - 4 * (jm / 6) * v**3
+
+    desc = B**2 - 4 * A * C
+    if desc < 0:
         return 0
 
+    return (-B + np.sqrt(B**2 - 4 * A * C)) / (2 * A) - q
 
-    dtdq = 1/(dt**2 * jM) + (2 * a / dt**2 + 2 * jM / dt)  / (2 * jM * np.sqrt(a**2 + 2 * jM * v))
-
-    return t / dt + v * dtdq + (2 * a / dt*2) * t**2 / 2 + a * t * dtdq - jM * t**2 * dtdq / 2
-
-def bounds(q0, v0, a0):
-    q_star = q0 + v0 * dt + a0 * dt**2 / 2
-
-    top = qr - q_star - delta_q(q_star, q0, v0)
-    bottom = 1 + d_delta_q(q_star, q0, v0)
-    return top / bottom + q_star
-
-def instant_bounds(q0, v0, a0):
-    ub = qr
-
-    lb = max(-qr, q0 - dt * v_max, q0 - dt**2 * a_max + v0 * dt, q0 - dt**3 * j_max + dt**2 * a0 + dt * v0)
-    ub = min(qr, q0 + dt * v_max, q0 + dt**2 * a_max + v0 * dt, q0 + dt**3 * j_max + dt**2 * a0 + dt * v0)
-    return lb, ub
+def stopping_v(a0):
+    v = a0 * dt + j_max * dt**2
+    a = a0 + j_max * dt
+    jm = - j_max
+    return v - a**2 / (2 * jm)
 
 
-max_stopping_time = 0.035
-print(max_stopping_time)
-tA = a_max / j_max
-max_stopping_time = tA + (v_max - j_max * tA**2 / 2) / a_max
+def q_bounds(q, v, a):
+
+    
+    suqb = q_max - 1e-4 - stopping_distance(v, a)
+    slqb = -q_max + 1e-4 + stopping_distance(-v, -a)
+    suvb = v_max - 1e-4 - stopping_v(a)
+    slvb = -v_max + 1e-4 + stopping_v(-a)
+    suab = a_max
+    slab = -a_max
+    sujb = max(a_max - a, 0) / dt
+    sljb = min(-a_max - a, 0) / dt
+
+    sub = min(suqb, q + suvb * dt, q + v * dt + suab * dt**2, q + v * dt + a * dt**2 + sujb * dt**3)
+    slb = max(slqb, q + slvb * dt, q + v * dt + slab * dt**2, q + v * dt + a * dt**2 + sljb * dt**3)
 
 
-a = [0]
-v = [0]
-q = [0]
-for i in range(2000):
-    lb, ub = instant_bounds(q[-1], v[-1], a[-1])
-    ub = max(lb, min(qr-0.2, ub))
-    q.append(ub)
-    v.append((q[-1] - q[-2]) / dt)
-    a.append((v[-1] - v[-2]) / dt)
-i = np.argmax(q)
-j = i
+    ujb = min((q_max - q - v * dt - a*dt**2) / dt**3, (max(v_max - v,0) - a * dt) / dt**2, max(a_max - a,0) / dt, j_max)
+    ljb = max((-q_max + q + v * dt + a*dt**2) / dt**3, (min(-v_max - v,0) + a * dt) / dt**2, min(-a_max - a,0) / dt, -j_max)
 
-print(q[j], v[j], a[j])
-print(instant_bounds(q[j], v[j], a[j]))
 
-plt.plot(q, label = 'q')
-plt.plot(v, label = 'v')
-plt.plot(a, label = 'a')
-plt.ylim([-20,20])
-plt.legend()
+    hub = q + v * dt + a * dt**2 + ujb * dt**3
+    hlb = q + v * dt + a * dt**2 + ljb * dt**3
+    sub = max(sub, hlb)
+    slb = min(slb, hub)
+
+    if sub < slb:
+        mb = (sub + slb) / 2
+        sub, slb = mb, mb
+
+    if sub < hlb or slb > hub:
+        print(hub, sub, hlb, slb)
+    return min(hub, sub) - q, max(hlb, slb) - q
+    
+
+
+
+qs = [0]
+vs = [0]
+ass = [0]
+js = [0]
+q = qs[-1]
+v = vs[-1]
+a = ass[-1]
+mj = []
+for i in range(40000):
+
+    # ujb = total_max_j(q_max - q, v, a, a_max - a)
+    # ljb = -total_max_j(q + q_max, -v, -a, a + a_max)
+    # mj.append(ujb)
+
+    #max_dq = v * dt + a * dt**2 + ujb * dt**3
+    #min_dq = v * dt + a * dt**2 + ljb * dt**3
+    #max_dq = max(max_dq, min_dq)
+    max_dq, min_dq = q_bounds(q, v, a)
+    if max_dq < min_dq:
+        print(q, v, a)
+        print(max_dq, min_dq)
+        break
+    dq = (1) * (max_dq - min_dq) + min_dq
+    q = q + dq
+    a = (dq / dt - v) / dt
+    v = dq / dt
+
+    qs.append(q)
+    vs.append(v)
+    ass.append(a)
+    js.append((ass[-1] - ass[-2]) / dt)
+
+#plt.plot(mj)
+plt.plot(qs)
+plt.plot(vs)
+plt.plot(ass)
+#plt.plot(js)
+
+print(q_max - np.max(np.abs(qs)))
+print(np.max(np.abs(vs)))
+print(np.max(np.abs(ass)))
+print(np.max(np.abs(js)))
+# %%
+
+
+
+
+q_max = np.pi
+v_max = 2.61
+a_max = 7.5
+j_max = 375
+dt = 1e-4
+
+def stopping_distance(v0,a0):
+    q = v0 * dt + a0 * dt**2 + j_max * dt**3
+    v = v0 + a0 * dt + j_max * dt**2
+    a = a0 + j_max * dt
+    jm = -j_max
+    am = -a_max
+
+    tA = (am - a) / jm
+    vA = v + a * tA + jm * tA**2 /2
+    if vA > 0:
+        qA = q + v * tA + a * tA**2 / 2 + jm * tA**3 / 6
+        tV = - vA / am
+        return qA + vA * tV + am * tV **2 / 2
+    
+ 
+    A = - 27 * (-jm / 6)**2
+    B = 18 * (-jm / 6 * a / 2 * v) - 4 * (a / 2)**3
+    C = (a / 2)**2 * v**2 - 4 * (jm / 6) * v**3
+
+    desc = B**2 - 4 * A * C
+    if desc < 0:
+        return 0
+
+    return (-B + np.sqrt(B**2 - 4 * A * C)) / (2 * A) - q
+
+def stopping_v(a0):
+    v = a0 * dt + j_max * dt**2
+    a = a0 + j_max * dt
+    jm = - j_max
+    return v - a**2 / (2 * jm)
+
+
+for v0 in np.linspace(-v_max, v_max, 5):
+    for a0 in np.linspace(-a_max, a_max, 5):
+        print(v0, a0, stopping_distance(v0, a0))
+
+
+
 # %%

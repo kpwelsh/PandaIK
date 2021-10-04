@@ -1,4 +1,5 @@
 use std::f64::{INFINITY, NEG_INFINITY};
+use std::future;
 
 use hyperdual::Const;
 use k::{self, Constraints, UnitQuaternion};
@@ -7,8 +8,9 @@ use optimization_engine::{constraints::NoConstraints, panoc::*, *};
 extern crate nalgebra as na;
 use na::{SimdPartialOrd, Vector, Vector3};
 use crate::robot::state::{State};
-use crate::robot::constraints::RobotConstraints;
+use crate::robot::constraints::{RobotConstraints, Vector7};
 use super::constraints::{JointConstraint, ParsedConstraints};
+use std::ops::Add;
 
 
 
@@ -117,6 +119,115 @@ fn goal_cost(desired_state: &State, arm: &Arm, dt: f64) -> f64 {
     c
 }
 
+fn div(a: &Vector7, b: &Vector7) -> Vector7 {
+    a.zip_map(b, |_a, _b| _a / _b)
+}
+
+fn clip(a: &Vector7, lb: &Vector7, ub: &Vector7) -> Vector7 {
+    a.sup(lb).inf(ub)
+}
+
+fn pow(a: &Vector7, p: f64) -> Vector7 {
+    a.map(|_a| _a.powf(p))
+}
+
+
+fn max_j_v(v0: &Vector7, a0: &Vector7, v_max: &Vector7, j_max: &Vector7, dt: f64) -> Vector7 {
+    let jm = -j_max;
+    let A = -pow(&jm, -1.) * dt.powf(2.) / 2.;
+    let B = -(pow(&jm, -1.).component_mul(&a0) * dt).add_scalar(-dt.powf(2.));
+    let C = -(v_max - v0) + a0*dt - pow(&jm, -1.).component_mul(&pow(a0, 2.)) / 2.; 
+    (-B + pow(&(pow(&B, 2.) - 4. * A.component_mul(&C)), 0.5)).component_div(&(2. * A))
+}
+
+fn max_tA_j(dq: &Vector7, v0: &Vector7, a0: &Vector7, a_max: &Vector7, j_max: &Vector7, dt: f64) -> Vector7 {
+    let am = -a_max;
+    let jm = -j_max;
+    let tA = div(&am, &jm) - div(&clip(&(a0 ), &-a_max, &a_max), &jm);
+    let Vc = v0 + a0.component_mul(&tA.add_scalar(dt)) + jm.component_mul(&tA.component_mul(&tA)) / 2.;
+
+    let A = -div(&pow(&(dt * tA).add_scalar(dt.powf(2.)),2.), &(2. * am));
+    let B = (pow(&tA, 2.) + tA * dt.powf(2.)).add_scalar(dt.powf(3.)) - Vc.component_mul(&(tA * dt).add_scalar(dt.powf(2.))).component_div(&am);
+    let C = 
+        -dq + 
+        jm.component_mul(&pow(&tA, 3.)) / 6. +
+        a0.component_mul(&((pow(&tA, 2.) / 2. + dt * tA).add_scalar(dt.powf(2.)))) -
+        pow(&Vc, 2.).component_div(&(2. * am));
+    
+    (-B + pow(&(pow(&B, 2.) - 4. * A.component_mul(&C)), 0.5)).component_div(&(2. * A))
+}
+
+fn jerk_bound(q0: &Vector7, v0: &Vector7, a0: &Vector7, constraints: &ParsedConstraints, dt: f64) -> (Vector7, Vector7) {
+    let zeros = Vector7::from([0.; 7]);
+    let buffer = Vector7::from([1e-5; 7]);
+    let dq = (constraints.joint_max - q0).sup(&zeros);
+
+    let max_j = 
+        ((constraints.joint_accel_max - a0 - buffer) / dt)
+        .inf(&( (dq - v0 * dt - a0 * dt.powf(2.)) / dt.powf(3.) ))
+        .inf(&max_j_v(v0, a0, &constraints.joint_vel_max, &constraints.joint_jerk_max, dt))
+        .inf(&max_tA_j(&dq, v0, a0, &constraints.joint_accel_max, &constraints.joint_jerk_max, dt));
+
+
+
+    let dq = (-constraints.joint_min + q0).sup(&zeros);
+    let min_j = 
+        ((constraints.joint_accel_max + a0 + buffer) / dt)
+        .inf(&( (dq + v0 * dt + a0 * dt.powf(2.)) / dt.powf(3.) ))
+        .inf(&max_j_v(&-v0, &-a0, &constraints.joint_vel_max, &constraints.joint_jerk_max, dt))
+        .inf(&max_tA_j(&dq, &-v0, &-a0, &constraints.joint_accel_max, &constraints.joint_jerk_max, dt));
+
+
+    (-min_j, max_j)
+}
+
+fn stopping_distance(v0: &Vector7, a0: &Vector7, constraints: &ParsedConstraints, dt: f64) -> Vector7 {
+    let q = v0 * dt + a0 * dt.powf(2.) + constraints.joint_jerk_max * dt.powf(3.);
+    let v = v0 + a0 * dt + constraints.joint_jerk_max * dt.powf(2.);
+    let a = a0 + constraints.joint_jerk_max * dt;
+
+    let jm = -constraints.joint_jerk_max;
+    let am = -constraints.joint_accel_max;
+    
+    let tA = (am - a).component_div(&jm);
+    let vA = v + a.component_mul(&tA) + jm.component_mul(&pow(&tA, 2.)) / 2.;
+
+    let qA = q + v.component_mul(&tA) + a.component_mul(&pow(&tA, 2.)) / 2. + jm.component_mul(&pow(&tA, 3.)) / 6.;
+    let tV = - vA.component_div(&am);
+    let qTV = qA + vA.component_mul(&tV) + am.component_mul(&pow(&tV, 2.)) / 2.;
+
+    let A = -27. * pow(&(jm / 6.), 2.);
+    let B = 18. * (jm / 6.).component_mul(&(a / 2.)).component_mul(&v)
+        - 4. * pow(&(a / 2.), 3.);
+    let C = pow(&(a / 2.), 2.).component_mul(&pow(&v, 2.))
+        - 4. * (jm / 6.).component_mul(&pow(&v, 3.));
+    
+    let desc = pow(&B, 2.) - 4. * A.component_mul(&C);
+
+
+    let mut res = Vector7::from([0.; 7]);
+    for i in 0..7 {
+        if vA[i] > 0. {
+            res[i] = qTV[i];
+        } else {
+            if desc[i] < 0. {
+                res[i] = 0.;
+            } else {
+                res[i] = (-B[i] + (B[i].powf(2.) - 4. * A[i] * C[i]).sqrt()) / (2. * A[i]);
+            }
+        }
+    }
+    res
+}
+
+fn stopping_v(a0: &Vector7, constraints: &ParsedConstraints, dt: f64) -> Vector7 {
+    let v = a0 * dt + constraints.joint_jerk_max * dt.powf(2.);
+    let a = a0 + constraints.joint_jerk_max * dt;
+    let jm = -constraints.joint_jerk_max;
+
+    v - pow(&a, 2.).component_div(&jm) / 2.
+}
+
 fn compute_bounds(state: &State, constraints: &ParsedConstraints, dt: f64) -> ([f64;7], [f64;7]) {
     let q = Vector::from(state.joint_position.map(|p| p.unwrap()));
     let dq = Vector::from(state.joint_velocity.map(|p| p.unwrap()));
@@ -125,53 +236,86 @@ fn compute_bounds(state: &State, constraints: &ParsedConstraints, dt: f64) -> ([
     let dt2 = dt * dt;
     let dt3 = dt2 * dt;
 
-    let mut lower_bounds = Vec::new();
-    lower_bounds.push(constraints.joint_min);
-    lower_bounds.push(constraints.joint_vel_min*dt + q);
-    lower_bounds.push(constraints.joint_accel_min*dt2 + dq*dt + q);
-    lower_bounds.push(constraints.joint_jerk_min*dt3 + ddq*dt2 + dq*dt + q);
-    let mut upper_bounds = Vec::new();
-    upper_bounds.push(constraints.joint_max);
-    upper_bounds.push(constraints.joint_vel_max*dt + q);
-    upper_bounds.push(constraints.joint_accel_max*dt2 + dq*dt + q);
-    upper_bounds.push(constraints.joint_jerk_max*dt3 + ddq*dt2 + dq*dt + q);
+    let zeros = Vector7::from([0.; 7]);
+    let s = 0.9;
+    let buffer = Vector7::from([1e-4;7]);
+    let suqb = constraints.joint_max - buffer - stopping_distance(&dq, &ddq, constraints, dt);
+    let slqb = constraints.joint_min + buffer + stopping_distance(&-dq, &-ddq, constraints, dt);
 
-    let mut lower_bound = [NEG_INFINITY; 7];
-    let mut upper_bound = [INFINITY; 7];
+    let suvb = constraints.joint_vel_max - buffer - stopping_v(&ddq, constraints, dt);
+    let slvb = constraints.joint_vel_min + buffer + stopping_v(&-ddq, constraints, dt);
+    
+    let suab = constraints.joint_accel_max;
+    let slab = constraints.joint_accel_min;
 
-    for i in 0..4 {
-        for j in 0..7 {
-            lower_bound[j] = lower_bound[j].max(lower_bounds[i][j]);
-            upper_bound[j] = upper_bound[j].min(upper_bounds[i][j]);
+    let sujb = (suab - ddq).sup(&zeros);
+    let sljb = (slab - ddq).inf(&zeros);
+
+    let mut sub = suqb
+        .inf(&(q + suvb * dt))
+        .inf(&(q + dq * dt + suab * dt.powf(2.)))
+        .inf(&(q + dq * dt + ddq * dt.powf(2.) + sujb * dt.powf(3.)));
+    let mut slb = slqb
+        .sup(&(q + slvb * dt))
+        .sup(&(q + dq * dt + slab * dt.powf(2.)))
+        .sup(&(q + dq * dt + ddq * dt.powf(2.) + sljb * dt.powf(3.)));
+
+    let ujb = (&((constraints.joint_max - q - dq * dt - ddq * dt.powf(2.)) / dt.powf(3.)))
+        .inf(&(((constraints.joint_vel_max - dq).sup(&zeros) - ddq * dt) / dt.powf(2.)))
+        .inf(&(((constraints.joint_accel_max - ddq).sup(&zeros)) / dt))
+        .inf(&constraints.joint_jerk_max);
+    let ljb = (&((constraints.joint_min - q - dq * dt - ddq * dt.powf(2.)) / dt.powf(3.)))
+        .sup(&(((constraints.joint_vel_min - dq).inf(&zeros) - ddq * dt) / dt.powf(2.)))
+        .sup(&(((constraints.joint_accel_min - ddq).inf(&zeros)) / dt))
+        .sup(&constraints.joint_jerk_min);
+
+
+    let hub = q + dq * dt + ddq * dt2 + ujb * dt3;
+    let hlb = q + dq * dt + ddq * dt2 + ljb * dt3;
+    
+    sub = sub.sup(&hlb);
+    slb = slb.inf(&hub);
+
+    for i in 0..7 {
+        if sub[i] < slb[i] {
+            let m = (sub[i] + slb[i]) / 2.;
+            sub[i] = m;
+            slb[i] = m;
         }
     }
 
-    for j in 0..7 {
-        let joint_lb = constraints.joint_min[j] + 0.2;
-        let joint_ub = constraints.joint_max[j] - 0.2;
-        if joint_lb >= lower_bound[j] {
-            lower_bound[j] = joint_lb.min(upper_bound[j]);
-        }
-        if joint_ub <= upper_bound[j] {
-            upper_bound[j] = joint_ub.max(lower_bound[j]);
-        }
 
-        if upper_bound[j] < lower_bound[j] {
-            println!("{}|{}", upper_bound[j] , lower_bound[j]);
-            println!("{},{},{}", q[j], dq[j], ddq[j]);
-            println!("{},{}", joint_lb, joint_ub);
+    for i in 0..7 {
+        if hub[i] < hlb[i] {
+            println!("{:?}", q);
+            println!("{:?}", constraints.joint_min);
+            println!("{:?}", dq);
+            println!("{:?}", constraints.joint_vel_max);
+            println!("{:?}", ddq);
+
+            println!("q: {:?}", q[i]);
+            println!("ub: {:?}", hub[i]);
+            println!("lb: {:?}", hlb[i]);
+
+            println!("suvb: {:?}", suvb[i]);
+            println!("suab: {:?}", suab[i]);
+
+            println!("dq: {:?}", dq[i]);
+            println!("ddq: {:?}", ddq[i]);
             panic!("");
         }
     }
-    
-    // println!("q: {:?}", q);
-    // println!("dq: {:?}", dq);
-    // println!("ddq: {:?}", ddq);
-    // println!("Bounds: {:?}", Vector::from(upper_bound) - Vector::from(lower_bound));
+
+    let mut lower_bound = [NEG_INFINITY; 7];
+    let mut upper_bound = [INFINITY; 7];
+    for i in 0..7 {
+        lower_bound[i] = hlb[i].max(slb[i]);
+        upper_bound[i] = hub[i].min(sub[i]);
+    }
+
 
     (lower_bound, upper_bound)
 }
-
 
 pub struct Controller {
     panoc_cache : PANOCCache,
@@ -198,7 +342,24 @@ impl Controller {
 
         let arm = &mut self.arm;
 
+
+        let mut ub = [INFINITY; 7];
+        let mut lb = [NEG_INFINITY; 7];
+
+        if let Some(constraints) = &self.constriants {
+            for i in 0..7 {
+                ub[i] = ub[i].min(constraints.joint_max[i]);
+                lb[i] = lb[i].max(constraints.joint_min[i]);
+            }
+        }
+
         let cost = |u: &[f64], c: &mut f64| {
+
+            // let mut clipped = [0.; 7];
+            // for i in 0..7 {
+            //     clipped[i] = u[i].max(lb[i]).min(ub[i]);
+            // }
+
             if let Err(err) = arm.set_joint_positions(u) {
                 println!("{}|{:?}", err, u);
                 panic!();
@@ -220,8 +381,6 @@ impl Controller {
         
         let status;
 
-        // Got kinda fed up with the types of this stuff and just copied some code.
-        // Probably should use a default Rectangle with +-Inf bounds instead of "NoConstraints"
         if let Some(constraints) = &self.constriants {
             let (lb, ub) = compute_bounds(state, constraints, dt);
             let bounds = Rectangle::new(Some(&lb), Some(&ub));
